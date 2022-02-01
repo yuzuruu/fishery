@@ -369,11 +369,47 @@ fish_price_live_swim_df <-
   fish_price_live_swim$price_file_live_swim %>%
   dplyr::bind_rows(.)
 # 活魚データを結合・保存
+# 活魚については以降このデータを利用すべし
 fish_price_live_df <- 
   dplyr::bind_rows(
     fish_price_live_floor_df,
     fish_price_live_swim_df
+  ) %>% 
+  # データがない日についてもデータを挿入する
+  # 作図や処理をするにも、そのほうが便利
+  # ついでに曜日も挿入するか。
+  # グループ毎に切り分けて
+  group_by(species, type, status) %>%
+  # 欠けた日付を、上記グループ毎に埋めて
+  # 関数使い方参考ページ：
+  # https://blog.exploratory.io/populating-missing-dates-with-complete-and-fill-functions-in-r-and-exploratory-79f2a321e6b5
+  tidyr::complete(
+    year_month_date = seq.Date(
+      min(.$year_month_date), 
+      max(.$year_month_date), 
+      # 単位は日。
+      by = "day"
+      )
+    ) %>% 
+  # グループ化を解いて
+  ungroup() %>% 
+  # なぜかある魚種がNAなデータを除去して
+  drop_na(species) %>% 
+  # 曜日列も加えて
+  dplyr::mutate(
+    # lubridate::wday()は、日付データから曜日を取得する
+    week_of_day = lubridate::wday(
+      year_month_date,
+      # 曜日名を入れる。
+      # FALSEにすると番号だけが残る
+      label = TRUE
+      )
+  ) %>% 
+  # 変数（列）順番を並び替えて
+  dplyr::select(
+    species, type, status, year_month_date, week_of_day, volume, price
   )
+# 保存する
 write_excel_csv(fish_price_live_df, "fish_price_live_df.csv")
 saveRDS(fish_price_live_df, "fish_price_live_df.rds")
 # 
@@ -383,3 +419,40 @@ saveRDS(fish_price_live_df, "fish_price_live_df.rds")
 ##
 #
 
+
+
+# 遊び用だよーん
+# hogedata <- 
+#   fish_price_live_df %>% 
+#   dplyr::filter(year_month_date >= "2021-01-01")
+# readr::write_excel_csv(hogedata,"hogedata.csv")
+# 
+# library(viridis)
+# library(khroma)
+# 
+# hoge <- 
+#   hogedata %>%
+#   filter(type == "floor" & status == "medium" & species == "ヒラス" | species == "タイ") %>% 
+#   ggplot2::ggplot(
+#     aes(
+#       x = year_month_date,
+#       y = volume,
+#       color = species
+#     )
+#   ) +
+#   geom_line() +
+#   labs(
+#     title = "Dayly shipped volume of sea bream and gold-striped amberjack",
+#     subtitle = "Target: Pagrus major (Tai) and  Seriola lalandi Valenciennes (Hirasu)",
+#     x = "Day (25th. Jan. 2021 - 29th. Jan. 2022)",
+#     y = "Volume (Unit: kg)",
+#     color = "魚種",
+#     caption = "By Yuzuru Utsunomiya, Ph. D."
+#   ) +
+#   scale_color_okabeito() +
+#   scale_x_date(date_breaks = "2 months") +
+#   theme_classic() + 
+#   theme(
+#     legend.position = "bottom"
+#   )
+# ggsave("hoge.pdf", plot =  hoge, device = cairo_pdf)
