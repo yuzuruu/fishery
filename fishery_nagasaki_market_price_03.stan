@@ -15,6 +15,8 @@ parameters {
   vector [N] season[TT]; // refed as season[TT,N]
   vector [N] week[TT]; // refed as season[TT,N]
   real<lower=0> sd_q; // pro_devの分布のSD。時点・魚種を通じて共通。
+  real<lower=0> sd_season; // 季節変動の分布のSD。時点・魚種を通じて共通。
+  real<lower=0> sd_week; // 週変動の分布のSD。時点・魚種を通じて共通。
   real<lower=0> sd_r[N]; // obs variances are different。観測空間のばらつき(SD)。魚種毎に異なる。時点を通じて共通
 }
 transformed parameters {
@@ -35,7 +37,11 @@ model {
   // 事前分布
   // 平均成長率の事前分布
   u ~ normal(0,100);
+  // 時間・魚種変動の標準偏差の事前分布
   sd_q ~ student_t(3, 0, 10);
+  // 季節変動と週変動の事前分布
+  sd_season ~ student_t(3, 0, 10);
+  sd_week ~ student_t(3, 0, 10);
   // 
   for(i in 1:N){
     // 初期値。左端というか最初の日の直前の状態を推定する
@@ -49,13 +55,13 @@ model {
     // とりあえず28日（月齢）にしてます。
     // 図を見る限り180日くらいでもよさそうな
     for(t in 180:TT){
-      season[t, i] ~ normal(-sum(season[(t-179):(t-1),i]), sd_q);
+      season[t, i] ~ normal(-sum(season[(t-179):(t-1),i]), sd_season);
     }
     //　週変動。魚種毎に異なる
     // とりあえず7日（月齢）にしてます。
     // 図を見る限り180日くらいでもよさそうな
     for(t in 7:TT){
-      week[t, i] ~ normal(-sum(season[(t-6):(t-1),i]), sd_q);
+      week[t, i] ~ normal(-sum(season[(t-6):(t-1),i]), sd_week);
     }
   }
   // 観測空間
