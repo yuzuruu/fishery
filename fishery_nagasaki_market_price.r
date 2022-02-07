@@ -29,56 +29,64 @@ library(tabulizer)
 library(janitor)
 library(ragtop)
 library(rvest)
+library(cmdstanr)
+library(bayesplot)
 # 
-### ---- read.pdf.files ---- 
-# ファイル名を読み込む。
-# 自動読み込みに備えて、ファイル名はオブジェクトに収納する。
-# 複数になってもおなじこと。
-# とりあえず単数ファイルで試して読み込む作業がうまくいってから複数ファイル自動読み込み化へ移行する。
-file_names <- 
-  data.frame(file_name = list.files("fish_price_nagasaki")) %>% 
-  dplyr::mutate(
-    file_name = paste0("./fish_price_nagasaki/", file_name)
-  )
-# 複数ファイルをいっぺんに読み込む。
-# かなり時間がかかるから注意。
-# どのくらい？それはわからんというくらい。
-# 17時40分から17時52分までかかった。
-# 001
-fish_price <- 
-  file_names %>% 
-  group_by(file_name) %>% 
-  dplyr::mutate(
-    price_file = purrr::map(
-      .,
-      ~
-        tabulizer::extract_tables(
-          file = file_name, 
-          output = "data.frame"
-        ) %>% 
-        purrr::map_dfr(as.data.frame)
-        # purrr::map(as.data.frame)
-    )
-  ) %>% 
-  dplyr::mutate(
-    year_month_date = lubridate::ymd(
-      str_sub(
-        file_name,
-        start = -12,
-        end = -5
-      )
-    )
-  ) %>% 
-  dplyr::select(file_name, year_month_date, price_file)
+# ### ---- read.pdf.files ---- 
+# 使わないときはコメントアウトする
+# 処理に時間がかかるから
+# # ファイル名を読み込む。
+# # 自動読み込みに備えて、ファイル名はオブジェクトに収納する。
+# # 複数になってもおなじこと。
+# # とりあえず単数ファイルで試して読み込む作業がうまくいってから複数ファイル自動読み込み化へ移行する。
+# file_names <- 
+#   data.frame(file_name = list.files("fish_price_nagasaki")) %>% 
+#   dplyr::mutate(
+#     file_name = paste0("./fish_price_nagasaki/", file_name)
+#   )
+# # 複数ファイルをいっぺんに読み込む。
+# # かなり時間がかかるから注意。
+# # どのくらい？それはわからんというくらい。
+# # 17時40分から17時52分までかかった。
+# # 001
+# fish_price <- 
+#   file_names %>% 
+#   group_by(file_name) %>% 
+#   dplyr::mutate(
+#     price_file = purrr::map(
+#       .,
+#       ~
+#         tabulizer::extract_tables(
+#           file = file_name, 
+#           output = "data.frame"
+#         ) %>% 
+#         purrr::map_dfr(as.data.frame)
+#         # purrr::map(as.data.frame)
+#     )
+#   ) %>% 
+#   dplyr::mutate(
+#     year_month_date = lubridate::ymd(
+#       str_sub(
+#         file_name,
+#         start = -12,
+#         end = -5
+#       )
+#     )
+#   ) %>% 
+#   dplyr::select(file_name, year_month_date, price_file)
 # 
 # 読んだデータを保存する。
 # 上記コードはかなり時間がかかるからねぇ。
 # ファイルサイズ事態は大したことない。388kくらい。
 # 使わないときはコメントアウトする。
 # saveRDS(
-#   fish_price, 
+#   fish_price,
 #   "fish_price.rds"
 #   )
+fish_price <-
+  readRDS(
+    "fish_price.rds"
+    )
 # 
 ### ---- read.data.by.part ----
 # 必要な箇所に分割して読み込む。
@@ -89,6 +97,7 @@ fish_price <-
 # どういうわけか、pdfファイルを読み込んだとき、blankができちゃった。
 # blankを除去すれば、ファイルサイズも見た目もよくできるから除去する。
 # https://community.rstudio.com/t/removing-blanks-nas/27887/3
+# ここは活魚。台物と泳ぎを含む
 # 011
 fish_price_live <- 
   fish_price %>%
@@ -403,15 +412,324 @@ fish_price_live_df <-
       # 曜日名を入れる。
       # FALSEにすると番号だけが残る
       label = TRUE
-      )
+    ),
+    n_week_of_day = lubridate::wday(
+      year_month_date,
+      # 曜日番号を入れる。
+      # FALSEにすると番号だけが残る
+      label = FALSE
+    ),
+    n_week = lubridate::week(year_month_date),
+    year = lubridate::year(year_month_date),
+    month = lubridate::month(year_month_date, label = TRUE, abbr = TRUE),
+    day = lubridate::day(year_month_date)
   ) %>% 
   # 変数（列）順番を並び替えて
   dplyr::select(
-    species, type, status, year_month_date, week_of_day, volume, price
+    species, type, status, year_month_date, year, month, day, week_of_day, n_week_of_day, n_week, volume, price
   )
 # 保存する
 write_excel_csv(fish_price_live_df, "fish_price_live_df.csv")
 saveRDS(fish_price_live_df, "fish_price_live_df.rds")
+# 
+# 
+#
+##
+### END
+##
+#
+### ---- read.library.live ----
+# Circularプロット作図
+# とりあえずタイ台物中位価格のみ
+# 他はいろいろ考えてからやりましょう
+fish_price_live_circle <- 
+  fish_price_live_df %>%
+  # 必要なデータを選ぶ
+  dplyr::filter(species == "タイ" &type == "floor" & status == "medium") %>% 
+  ggplot2::ggplot(
+    aes(
+      x = week_of_day,
+      y = log(volume+0.5),
+      group = factor(n_week),
+      color = month
+    )
+  ) + 
+  geom_line(fill = NA, na.rm = TRUE) +
+  labs(
+    title = "タイ数量曜日別推移",
+    subtitle = "長崎魚市株式会社「鮮魚速報」2019年1月25日-2022年1月25日分より。活魚・台物。",
+    x = "曜日",
+    y = "数量（単位：kg。log+0.5）",
+    color = "月次"
+  ) +
+  scale_colour_smoothrainbow(discrete = TRUE, reverse = TRUE) +
+  coord_polar() +
+  facet_wrap(~ year) +
+  theme_bw() +
+  theme(
+    strip.background = element_blank()
+  )
+
+ggsave(
+  "fish_price_live_circle.pdf",
+  plot = fish_price_live_circle,
+  width = 200,
+  height = 200,
+  units = "mm",
+  device = cairo_pdf
+)
+# 折れ線グラフで「数量」日推移を表現する。
+# とりあえずタイ台物、中位価格だけ。
+fish_price_live_line_01 <- 
+  fish_price_live_df %>%
+  # 必要なデータを選ぶ
+  dplyr::filter(
+    species == "タイ" & type == "floor" & status == "medium") %>% 
+  ggplot2::ggplot(
+    aes(
+      x = year_month_date,
+      y = volume
+    )
+  ) + 
+  geom_line(na.rm = TRUE) +
+  # x軸目盛りを4ヶ月毎に振る
+  scale_x_date(
+    date_breaks = "4 months"
+    ) +
+  labs(
+    title = "タイ数量日別推移",
+    subtitle = "長崎魚市株式会社「鮮魚速報」2019年1月25日-2022年1月25日分より。活魚・台物。",
+    x = "日",
+    y = "数量（単位：kg）"
+  ) +
+  theme_classic()
+fish_price_live_line_01
+
+# 状態空間モデル用おためしデータセット
+# タイとヒラスを選ぶ
+# 必要に応じて、データ範囲は拡大できる
+fish_price_live_df_selected <- 
+  fish_price_live_df %>%
+  # 必要なデータを選ぶ
+  dplyr::filter(
+    species %in% c("タイ", "ヒラス") & type == "floor" & status == "medium"
+    ) %>% 
+  dplyr::select(
+    species, year_month_date, volume 
+  ) %>% 
+  tidyr::pivot_wider(
+    names_from = "species",
+    values_from = "volume"
+  ) %>% 
+  data.table::setnames(c("year_month_date","tai","hirasu")) 
+  
+# 行列にしてひっくりかえす
+# tidyなままだとstanが受け付けてくれない。
+# brmsだといいけれど、stanネイティブだとやめておいたほうが無難。特に複数は
+Y <- 
+  fish_price_live_df_selected %>% 
+  dplyr::select(tai, hirasu) %>% 
+  as.matrix(.) %>% 
+  t(.)
+# stanに食べさせる用にデータを加工する
+# NAではないデータを取り出す
+ypos <- Y[!is.na(Y)]
+# NAではないデータ個数を数える
+n_pos <- length(ypos)  # number on non-NA ys
+# NAではないデータにインデックスをつける
+indx_pos <- which(!is.na(Y), arr.ind = TRUE)  # index on the non-NAs
+col_indx_pos <- as.vector(indx_pos[, "col"])
+row_indx_pos <- as.vector(indx_pos[, "row"])
+# stan用データリスト作成
+data_volume <-
+  list(
+    y = ypos,
+    TT = ncol(Y), 
+    N = nrow(Y), 
+    n_pos = n_pos, 
+    col_indx_pos = col_indx_pos,
+    row_indx_pos = row_indx_pos
+  )
+# 
+# レベルと時間・魚種変動に、季節変動と週変動を組み込んだモデル
+# 02
+# 季節変動：
+# stanモデルをコンパイルする
+model_volume <-
+  cmdstan_model(
+    # モデルは別ファイルに書く
+    stan_file = "fishery_nagasaki_market_price_02.stan",
+    compile = TRUE
+    )
+# stanモデルをあてはめる
+# けっこう時間がかかるから注意。
+fit_volume <-
+  model_volume$sample(
+    data_volume,
+    iter_warmup = 500,
+    iter_sampling = 500,
+    chains = 4,
+    parallel_chains = 4,
+    refresh = 200
+  )
+# 結果を保存する
+saveRDS(fit_volume, "fit_volume.rds")
+# 結果要約をcsvファイルにて保存
+fit_volume <- readRDS("fit_volume.rds")
+summary_volume <- fit_volume$summary()
+write_excel_csv(data.frame(summary_volume), "summary_volume.csv")
+# ここからは作図
+# 推定結果から、推定された「数量」を取り出す
+fish_price_live_df_estimated <- 
+  summary_volume %>% 
+  dplyr::filter(
+    ., 
+    stringr::str_detect(
+      variable, 
+      "yhat"
+      )
+    ) %>% 
+  dplyr::select(mean, median, sd, q5, q95)
+# 縦長データに戻す
+fish_price_live_df_selected_02 <- 
+  fish_price_live_df_selected %>% 
+  tidyr::pivot_longer(
+    cols = c("tai","hirasu"),
+    names_to = "species",
+    values_to = "volume"
+  ) %>% 
+  # 結合しやすいように並び替える
+  dplyr::arrange(desc(species)) %>% 
+  # 横方向に元データと結合する
+  dplyr::bind_cols(fish_price_live_df_estimated) %>% 
+  # タイやヒラスを日本語に戻す
+  dplyr::mutate(
+    species = dplyr::case_when(
+      species == "tai" ~ "タイ",
+      species == "hirasu" ~ "ヒラス",
+      TRUE ~ "hoge"
+    )
+  )
+
+fish_price_live_line_02 <- 
+  fish_price_live_df_selected_02 %>% 
+  ggplot2::ggplot(
+    aes(
+      x = year_month_date, 
+      y = volume,
+      color = species
+    )
+  ) +
+  geom_line(
+    aes(
+      x = year_month_date,
+      y = mean,
+      color = species
+    )
+  ) +
+  geom_point(size = 0.5) +
+  scale_color_okabeito() +
+  facet_wrap(~ species, scales = "free_y") +
+  theme_classic() +
+  theme(
+    strip.background = element_blank()
+  )
+fish_price_live_line_02
+ggsave("fish_price_live_line_02.pdf", width = 200, height = 200, units = "mm")
+# 
+# レベルと時間・魚種変動に、季節変動と週変動を組み込んだモデル
+# 03
+# 季節変動：
+# 週変動：
+# stanモデルをコンパイルする
+model_volume_03 <-
+  cmdstan_model(
+    # モデルは別ファイルに書く
+    stan_file = "fishery_nagasaki_market_price_03.stan",
+    compile = TRUE
+  )
+# stanモデルをあてはめる
+# けっこう時間がかかるから注意。
+fit_volume_03 <-
+  model_volume$sample(
+    data_volume,
+    iter_warmup = 500,
+    iter_sampling = 500,
+    chains = 4,
+    parallel_chains = 4,
+    refresh = 200
+  )
+# 結果を保存する
+saveRDS(fit_volume_03, "fit_volume_03.rds")
+# 結果要約をcsvファイルにて保存
+fit_volume_03 <- readRDS("fit_volume_03.rds")
+summary_volume_03 <- fit_volume_03$summary()
+write_excel_csv(data.frame(summary_volume_03), "summary_volume_03.csv")
+# ここからは作図
+# 推定結果から、推定された「数量」を取り出す
+fish_price_live_df_estimated_03 <- 
+  summary_volume_03 %>% 
+  dplyr::filter(
+    ., 
+    stringr::str_detect(
+      variable, 
+      "yhat"
+    )
+  ) %>% 
+  dplyr::select(mean, median, sd, q5, q95)
+# 縦長データに戻す
+fish_price_live_df_selected_03 <- 
+  fish_price_live_df_selected %>% 
+  tidyr::pivot_longer(
+    cols = c("tai","hirasu"),
+    names_to = "species",
+    values_to = "volume"
+  ) %>% 
+  # 結合しやすいように並び替える
+  dplyr::arrange(desc(species)) %>% 
+  # 横方向に元データと結合する
+  dplyr::bind_cols(fish_price_live_df_estimated_03) %>% 
+  # タイやヒラスを日本語に戻す
+  dplyr::mutate(
+    species = dplyr::case_when(
+      species == "tai" ~ "タイ",
+      species == "hirasu" ~ "ヒラス",
+      TRUE ~ "hoge"
+    )
+  )
+# 作図
+fish_price_live_line_03 <- 
+  fish_price_live_df_selected_03 %>% 
+  ggplot2::ggplot(
+    aes(
+      x = year_month_date, 
+      y = volume,
+      color = species
+    )
+  ) +
+  geom_line(
+    aes(
+      x = year_month_date,
+      y = mean,
+      color = species
+    )
+  ) +
+  geom_point(size = 0.5) +
+  scale_color_okabeito() +
+  facet_wrap(~ species, scales = "free_y") +
+  theme_classic() +
+  theme(
+    strip.background = element_blank()
+  )
+fish_price_live_line_03
+# 保存
+ggsave(
+  "fish_price_live_line_03.pdf", 
+  width = 200, 
+  height = 200, 
+  units = "mm",
+  device = cairo_pdf
+  )
 # 
 #
 ##
@@ -419,40 +737,3 @@ saveRDS(fish_price_live_df, "fish_price_live_df.rds")
 ##
 #
 
-
-
-# 遊び用だよーん
-# hogedata <- 
-#   fish_price_live_df %>% 
-#   dplyr::filter(year_month_date >= "2021-01-01")
-# readr::write_excel_csv(hogedata,"hogedata.csv")
-# 
-# library(viridis)
-# library(khroma)
-# 
-# hoge <- 
-#   hogedata %>%
-#   filter(type == "floor" & status == "medium" & species == "ヒラス" | species == "タイ") %>% 
-#   ggplot2::ggplot(
-#     aes(
-#       x = year_month_date,
-#       y = volume,
-#       color = species
-#     )
-#   ) +
-#   geom_line() +
-#   labs(
-#     title = "Dayly shipped volume of sea bream and gold-striped amberjack",
-#     subtitle = "Target: Pagrus major (Tai) and  Seriola lalandi Valenciennes (Hirasu)",
-#     x = "Day (25th. Jan. 2021 - 29th. Jan. 2022)",
-#     y = "Volume (Unit: kg)",
-#     color = "魚種",
-#     caption = "By Yuzuru Utsunomiya, Ph. D."
-#   ) +
-#   scale_color_okabeito() +
-#   scale_x_date(date_breaks = "2 months") +
-#   theme_classic() + 
-#   theme(
-#     legend.position = "bottom"
-#   )
-# ggsave("hoge.pdf", plot =  hoge, device = cairo_pdf)
